@@ -12,6 +12,7 @@ client = gspread.authorize(creds)
 spreadsheet = client.open(SPREADSHEET_NAME)
 sheet = client.open(SPREADSHEET_NAME).sheet1  # Лист для событий
 sheet_accounts = spreadsheet.worksheet("Счета")  # Лист для счетов
+sheet_transaction = spreadsheet.worksheet("Транзакции")  # Лист для истории транзакций
 
 
 def log_event(user_id, name, event, time=None, work_hours=None, salary=None):
@@ -25,6 +26,12 @@ def log_event(user_id, name, event, time=None, work_hours=None, salary=None):
     else:
         # Специальная запись для "Уход"
         sheet.append_row([time, user_id, name, "Уход", f"{work_hours} ч", f"{salary} руб."])
+
+def add_event_transaction(user_id, name, type ,salary, balance):
+   time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")  # Получаем текущее время
+   sheet_transaction.append_row([time, user_id, name, type, f"{salary} руб.", f"{balance} руб."])
+
+
 
 def get_user_name(user_id):
     """Возвращает имя сотрудника по user_id со второго листа таблицы."""
@@ -48,89 +55,33 @@ def check_and_fix_records(user_id, user_name, event):
             last_event_type = row[3]
             break
 
-    messages = []
-    if event == "Приход" and last_event_type != "Уход":
-        if last_event.date() < datetime.now().date():
-            # Если приход был в прошедший день → закрываем смену в 19:00
-            auto_checkout_time = datetime.combine(
-                last_event.date(), datetime.strptime(AUTO_CHECK_OUT_TIME, "%H:%M:%S").time()
-            )
-            log_event(user_id, user_name, "Уход", auto_checkout_time)
-            messages.append(
-                f"Смена за {last_event.strftime('%d-%m-%Y')} автоматически закрыта в {AUTO_CHECK_OUT_TIME}.")
+    if event == "Приход":
+        if last_event_type != "Уход":
+            return f'Вы не можете выполнить действие "{event}" после "{last_event_type}". Пожалуйста, выберите другое действие или обратитесь к администратору'
 
-        elif last_event.date() == datetime.now().date():
-            # Если приход был сегодня → закрываем смену сейчас и сразу добавляем новый приход
-            current_time = datetime.now()
-            log_event(user_id, user_name, "Уход", current_time)
+    if event == "Уход":
+        if last_event.date() != datetime.now().date():
+            return f'"{event}" не может быть выполнено в другой день, чем "{last_event_type}". Пожалуйста, выберите другое действие или обратитесь к администратору'
+        if last_event_type not in ["Закончил обед", "Приход"]:
+            return f'Вы не можете выполнить действие "{event}" после "{last_event_type}". Пожалуйста, выберите другое действие или обратитесь к администратору'
 
-            messages.append(f"Смена закрыта в {current_time.strftime('%H:%M')} и сразу начата новая смена.")
+    if event == "Начал обед":
+        if last_event.date() != datetime.now().date():
+            return f'"{event}" не может быть выполнено в другой день, чем "{last_event_type}". Пожалуйста, выберите другое действие или обратитесь к администратору'
+        if last_event_type not in ["Закончил обед", "Приход"]:
+            return f'Вы не можете выполнить действие "{event}" после "{last_event_type}". Пожалуйста, выберите другое действие или обратитесь к администратору'
 
+    if event == "Закончил обед":
+        if last_event.date() != datetime.now().date():
+            return f'"{event}" не может быть выполнено в другой день, чем "{last_event_type}" . Пожалуйста, выберите другое действие или обратитесь к администратору'
+        if last_event_type != "Начал обед":
+            return f'Вы не можете выполнить действие "{event}" после "{last_event_type}". Пожалуйста, выберите другое действие или обратитесь к администратору'
 
-
-    elif event == "Уход" and last_event_type not in ["Закончил обед"]:
-        # Если последнее событие — "Начал обед", но нет "Закончил обед" → добавляем "Закончил обед"
-        if last_event_type == "Начал обед":
-            time = datetime.now()
-            log_event(user_id, user_name, "Закончил обед", time)
-            messages.append(f"Автоматически закончен обед в {time.strftime('%H:%M')}")
-
-        if last_event_type == "Уход":
-            if last_event.date() != datetime.now().date():
-                auto_checkin_time = datetime.combine(datetime.now().date(),
-                                                     datetime.strptime(AUTO_CHECK_IN_TIME, "%H:%M:%S").time())
-
-                log_event(user_id, user_name, "Приход", auto_checkin_time)
-                messages.append(f"Автоматически открыта смена за {last_event.strftime('%d-%m-%Y')}")
-            else:
-                current_time = datetime.now()
-                log_event(user_id, user_name, "Приход", current_time)
-                messages.append(f"Смена автоматически открыта в {current_time.strftime('%H:%M')}")
-        if last_event_type == "Приход":
-            if last_event.date() != datetime.now().date():
-                auto_checkin_time = datetime.combine(datetime.now().date(),
-                                                     datetime.strptime(AUTO_CHECK_IN_TIME, "%H:%M:%S").time())
-                auto_checkout_time = datetime.combine(last_event.date(),
-                                                     datetime.strptime(AUTO_CHECK_OUT_TIME, "%H:%M:%S").time())
-                log_event(user_id, user_name, "Уход", auto_checkout_time)
-                log_event(user_id, user_name, "Приход", auto_checkin_time)
-                messages.append(f"Автоматически закрыта смена за {last_event.strftime('%d-%m-%Y')} и открыта за сегодня")
+    return None
 
 
 
-    elif event in "Начал обед" and last_event_type not in ["Закончил обед", "Приход"]:
-        # Если последнее событие — "Начал обед", но нет "Закончил обед" → добавляем "Закончил обед"
-        if last_event_type == "Начал обед":
-            time = datetime.now() + timedelta(seconds=DEFAULT_LUNCH_TIME)
-            log_event(user_id, user_name, "Закончил обед", time)
-            messages.append(f"Автоматически закончен обед в {time.strftime('%H:%M')}.")
 
-        if last_event_type == "Уход":
-            if last_event.date() != datetime.now().date():
-                # Если обед начался в другой день, открываем смену и фиксируем обед
-                auto_checkin_time = datetime.combine(datetime.now().date(),
-                                                     datetime.strptime(AUTO_CHECK_IN_TIME, "%H:%M:%S").time())
-
-                log_event(user_id, user_name, "Приход", auto_checkin_time)
-                messages.append(f"Автоматически открыта смена за {datetime.now().strftime('%d-%m-%Y')} и начат обед в {datetime.now().strftime('%H:%M')}.")
-            else:
-                current_time = datetime.now()
-                log_event(user_id, user_name, "Приход", current_time)
-                messages.append(f"Смена автоматически открыта в {current_time.strftime('%H:%M')}")
-
-    elif event == "Закончил обед" and last_event_type not in ["Начал обед"]:
-        min_lunch_start_time = datetime.now() - timedelta(seconds=DEFAULT_LUNCH_TIME)
-
-        for row in reversed(records):
-            if row[1] == str(user_id) and row[3] == "Приход":
-                last_check_in = datetime.strptime(row[0], "%d-%m-%Y %H:%M:%S")
-                min_lunch_start_time = min(last_check_in, min_lunch_start_time)
-                break
-
-        log_event(user_id, user_name, "Начал обед", min_lunch_start_time)
-        messages.append(f"Автоматически добавлено 'Начал обед' в {min_lunch_start_time.strftime('%H:%M')}.")
-
-    return "\n".join(messages) if messages else None
 
 
 def calculate_work_time(user_id):
@@ -160,7 +111,6 @@ def calculate_work_time(user_id):
                     total_lunch_time += (lunch_end - lunch_start).total_seconds()
                     lunch_end = None
                     lunch_start = None
-
 
     if lunch_start:
         total_lunch_time += DEFAULT_LUNCH_TIME

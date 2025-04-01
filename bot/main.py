@@ -36,7 +36,7 @@ async def notify_admins(message: str):
     """Отправляет сообщение всем администраторам"""
     for admin_id in ADMINS_ID:
         try:
-            await bot.send_message(admin_id, message)
+            await bot.send_message(admin_id, message, parse_mode="Markdown")
         except Exception as e:
             print(f"Ошибка отправки админу {admin_id}: {e}")
 
@@ -74,7 +74,7 @@ async def enter_salary_amount(call: types.CallbackQuery, state: FSMContext, call
     name = get_user_name(user_id)
     await state.update_data(user_id=user_id)
 
-    await call.message.answer(f"Введите сумму для выплаты {name}:")
+    await call.message.answer(f"Введите сумму для выплаты *{name}*:", parse_mode="Markdown")
     await state.set_state(SalaryPayment.entering_amount)
 
 
@@ -88,10 +88,13 @@ async def process_salary_payment(message: types.Message, state: FSMContext):
 
     new_balance = update_balance(user_id, -amount)
     if new_balance is not None:
-        await message.answer(f"Сотруднику {name} выплачено {amount} руб.\nНовый баланс: {new_balance} руб.")
+        add_event_transaction(int(user_id), name, "Выплата", amount, new_balance)
+        await message.answer(f"Сотруднику *{name}* выплачено *{amount} руб.*\nНовый баланс: *{new_balance} руб.*",
+                    parse_mode="Markdown")
         # Отправляем уведомление сотруднику
         try:
-            await bot.send_message(user_id, f"Вам выплачено {amount} руб.\nНовый баланс: {new_balance} руб.")
+            await bot.send_message(user_id, f"Вам выплачено *{amount} руб.*\nНовый баланс: *{new_balance} руб.*",
+                    parse_mode="Markdown")
         except Exception as e:
             await message.answer(f"Не удалось уведомить сотрудника (ID {user_id}). Возможно, у него закрыты ЛС.")
 
@@ -111,26 +114,30 @@ async def worker_action(message: types.Message):
         fix_message = check_and_fix_records(user_id, name, action)
         if fix_message:
             await message.answer(fix_message)
+            await notify_admins(f'Сотрудник *{name}* выбрал "{action}"" и получил ошибку: \n'
+                                f"_{fix_message}_")
+            return
 
         if action == "Уход":
             work_hours, salary = calculate_work_time(user_id)
             new_balance = update_balance(user_id, salary)
             log_event(user_id, name, action, work_hours=work_hours, salary=salary)
-            await message.answer(f"Вы отработали {work_hours} часов и заработали {salary} руб.\n"
-                                 f"Ваш текущий баланс: {new_balance} руб.")
+            add_event_transaction(user_id, name, "Заработок", salary, new_balance)
+            await message.answer(f"Вы отработали *{work_hours}* часов и заработали *{salary}* руб.\n"
+                                 f"Ваш текущий баланс: *{new_balance} руб.*", parse_mode='Markdown')
 
             # Уведомляем всех администраторов
-            await notify_admins(f"Сотрудник {name} ушёл с работы.\n"
-                                f"Отработано: {work_hours} часов\n"
-                                f"Зарплата: {salary} руб.\n"
-                                f"Текущий баланс: {new_balance} руб.")
+            await notify_admins(f"Сотрудник *{name}* ушёл с работы.\n"
+                                f"Отработано: *{work_hours}* часов\n"
+                                f"Зарплата: *{salary}* руб.\n"
+                                f"Текущий баланс: *{new_balance}* руб.")
         else:
             log_event(user_id, name, action)
             await message.answer(f"Записано: {action}")
-            await notify_admins(f"Сотрудник {name} отметил: {action}")
+            await notify_admins(f"Сотрудник *{name}* отметил: {action}")
     except Exception as e:
         print(e)
-        await bot.send_message(user_id, f"Не получилось выполнить действие. Ошибка: {e}")
+        await bot.send_message(user_id, f"Не получилось выполнить действие. Ошибка: _{e}_", parse_mode="Markdown")
 
 
 async def main():
