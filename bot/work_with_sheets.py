@@ -25,11 +25,11 @@ def log_event(user_id, name, event, time=None, work_hours=None, salary=None):
         sheet.append_row([time, user_id, name, event])
     else:
         # Специальная запись для "Уход"
-        sheet.append_row([time, user_id, name, "Уход", f"{work_hours} ч", f"{salary} руб."])
+        sheet.append_row([time, user_id, name, "Уход", work_hours, salary])
 
 def add_event_transaction(user_id, name, type ,salary, balance):
    time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")  # Получаем текущее время
-   sheet_transaction.append_row([time, user_id, name, type, f"{salary} руб.", f"{balance} руб."])
+   sheet_transaction.append_row([time, user_id, name, type, salary, balance])
 
 
 
@@ -84,11 +84,13 @@ def check_and_fix_records(user_id, user_name, event):
 
 
 
-def calculate_work_time(user_id):
-    """Вычисляет отработанное время и зарплату"""
-    records = sheet.get_all_values()  # Загружаем все записи
+def calculate_work_time(user_id, end_time=None):
+    """Вычисляет отработанное время и зарплату. Если задано end_time — используется оно вместо текущего времени."""
+    if end_time is None:
+        end_time = datetime.now()
+
+    records = sheet.get_all_values()
     last_check_in = None
-    last_check_out = None
     lunch_start = None
     lunch_end = None
     total_lunch_time = 0  # Время обеда в секундах
@@ -100,26 +102,28 @@ def calculate_work_time(user_id):
             if row[3] == "Приход":
                 last_check_in = time_event
                 break
-            elif row[3] == "Уход":
-                last_check_out = time_event
-                break
             elif row[3] == "Закончил обед":
                 lunch_end = time_event
             elif row[3] == "Начал обед":
                 lunch_start = time_event
                 if lunch_end:
                     total_lunch_time += (lunch_end - lunch_start).total_seconds()
-                    lunch_end = None
                     lunch_start = None
+                    lunch_end = None
 
+    # Если обед начался, но не закончился
     if lunch_start:
         total_lunch_time += DEFAULT_LUNCH_TIME
     if lunch_end:
         total_lunch_time += DEFAULT_LUNCH_TIME
 
-    work_time = datetime.now() - last_check_in - timedelta(seconds=total_lunch_time)
+    # Если нет прихода — вернуть 0
+    if not last_check_in:
+        return 0, 0
 
-    if work_time >= timedelta(hours=8) and not total_lunch_time:
+    work_time = end_time - last_check_in - timedelta(seconds=total_lunch_time)
+
+    if work_time >= timedelta(hours=8) and total_lunch_time == 0:
         work_time -= timedelta(seconds=DEFAULT_LUNCH_TIME)
 
     work_hours = round(work_time.total_seconds() / 3600, 2)  # Время в часах
@@ -129,8 +133,11 @@ def calculate_work_time(user_id):
     hourly_rate = DEFAULT_HOURLY_RATE  # Значение по умолчанию
 
     for row in accounts:
-        if row[0] == str(user_id):  # Найден сотрудник
-            hourly_rate = float(row[2])  # Берём ставку из таблицы
+        if row[0] == str(user_id):
+            try:
+                hourly_rate = float(row[2])
+            except (IndexError, ValueError):
+                pass
             break
 
     salary = round(work_hours * hourly_rate, 2)  # Заработок
@@ -181,3 +188,14 @@ def get_all_balances():
 
 def get_all_accounts():
     return sheet_accounts.get_all_values()[1:]
+
+
+def get_last_event(user_id):
+    """Возвращает тип и время последнего события пользователя"""
+    records = sheet.get_all_values()
+    for row in reversed(records):
+        if row[1] == str(user_id):
+            event_time = datetime.strptime(row[0], "%d-%m-%Y %H:%M:%S")
+            event_type = row[3]
+            return event_type, event_time
+    return None, None  # если записей нет

@@ -14,7 +14,8 @@ worker_kb = ReplyKeyboardMarkup(
 # Кнопки для админа
 admin_kb = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Выдать зарплату"), KeyboardButton(text="Просмотреть информацию")]
+        [KeyboardButton(text="Выдать зарплату"), KeyboardButton(text="Просмотреть информацию")],
+        [KeyboardButton(text="Добавить запись в таблицу")]
     ],
     resize_keyboard=True
 )
